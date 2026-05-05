@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.python-version
+
+# uv
+.uv/
+
+# Hydra
+outputs/
+multirun/
+.hydra/
+
+# Experiment tracking
+wandb/
+mlruns/
+
+# Data and checkpoints
+data/
+datasets/
+checkpoints/
+*.pth
+*.pt
+*.safetensors
+*.ckpt
+
+# Notebooks
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Secrets
+.env
+.env.local
