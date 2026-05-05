@@ -1,0 +1,23 @@
+[project]
+name = "vla-research"
+version = "0.1.0"
+description = "Research template for VLA / imitation learning experiments on single-arm manipulation"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.7.0,<2.11.0",
+    "torchvision>=0.22.0,<0.26.0",
+    "torchaudio>=2.7.0,<2.11.0",
+    "lerobot[training,pusht,diffusion]",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+torchaudio = { index = "pytorch-cu126" }
+lerobot = { path = "../lerobot", editable = true }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
