@@ -8,7 +8,8 @@ dependencies = [
     "torch>=2.7.0,<2.11.0",
     "torchvision>=0.22.0,<0.26.0",
     "torchaudio>=2.7.0,<2.11.0",
-    "lerobot[training,pusht,diffusion]",
+    "lerobot[training,pusht,diffusion,libero]",
+    "mani-skill",
 ]
 
 [tool.uv.sources]
