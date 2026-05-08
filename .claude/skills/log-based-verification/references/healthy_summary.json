@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "run_id": "smoke_pusht_20260506_091657",
+  "script": "scripts/lerobot_train_wrapped.py",
+  "status": "success",
+  "started_at": "2026-05-06T09:16:57Z",
+  "finished_at": "2026-05-06T09:17:49Z",
+  "runtime_seconds": 52.3,
+  "steps_requested": 500,
+  "steps_completed": 500,
+  "initial_loss": 0.345,
+  "final_loss": 0.077,
+  "loss_history": [
+    {"step": 200, "loss": 0.345},
+    {"step": 400, "loss": 0.077}
+  ],
+  "vram_peak_mb": 4210,
+  "preflight": {
+    "torch_version": "2.10.0+cu126",
+    "cuda_available": true,
+    "device_requested": "cuda",
+    "device_actual": "cuda",
+    "gpu_name": "NVIDIA GeForce RTX 3080",
+    "gpu_total_vram_mb": 10240,
+    "hostname": "workstation",
+    "python_version": "3.12.3",
+    "platform": "Linux-6.8.0-111-generic-x86_64-with-glibc2.39",
+    "packages": {
+      "lerobot": "0.5.2",
+      "torch": "2.10.0+cu126",
+      "torchvision": "0.25.0+cu126",
+      "diffusers": "0.35.2",
+      "gymnasium": "1.3.0",
+      "mani_skill": "3.0.1"
+    }
+  },
+  "config": {
+    "policy": "diffusion",
+    "dataset": "lerobot/pusht",
+    "batch_size": 64,
+    "device": "cuda"
+  },
+  "tags": [],
+  "anomalies": [],
+  "warnings": [],
+  "output_dir": "outputs/smoke/pusht"
+}
