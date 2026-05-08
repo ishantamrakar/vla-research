@@ -27,7 +27,23 @@ dataset:
   repo_id: "lerobot/pusht"
   # You can add overrides for dataset config if necessary
 
+env:
+  type: "pusht"
+  task: "PushT-v0"
+
 optimizer:
   type: "adamw"
   lr: 1e-4
   weight_decay: 1e-4
+
+wandb:
+  enable: true
+  project: "vla-research"
+  entity: null
+  name: "${experiment_name}"
+
+eval:
+  eval_freq: 500
+  n_episodes: 5
+  batch_size: 1
+

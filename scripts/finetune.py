@@ -8,9 +8,13 @@ from pathlib import Path
 from src.observability import RunContext
 import torch
 import logging
+import wandb
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.envs import make_env, make_env_pre_post_processors
+from lerobot.scripts.lerobot_eval import eval_policy_all
 from lerobot.policies import make_policy_config, make_policy, make_pre_post_processors
+from lerobot.envs import EnvConfig
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +31,17 @@ def main(cfg: DictConfig):
         steps_requested=cfg.train.steps,
         device=cfg.device,
     ) as run:
+        
+        # Initialize wandb
+        use_wandb = cfg.get("wandb", {}).get("enable", False)
+        if use_wandb:
+            wandb.init(
+                project=cfg.wandb.get("project", "vla-research"),
+                entity=cfg.wandb.get("entity", None),
+                name=cfg.wandb.get("name", cfg.experiment_name),
+                config=OmegaConf.to_container(cfg, resolve=True),
+                dir=output_dir,
+            )
         
         log.info("Loading dataset...")
         dataset_kwargs = OmegaConf.to_container(cfg.dataset, resolve=True)
@@ -46,6 +61,19 @@ def main(cfg: DictConfig):
             }
             
         dataset = LeRobotDataset(**dataset_kwargs)
+        
+        log.info("Setting up environment...")
+        env_kwargs = OmegaConf.to_container(cfg.get("env", {}), resolve=True)
+        eval_env = None
+        env_preprocessor = None
+        env_postprocessor = None
+        
+        if env_kwargs:
+            env_type = env_kwargs.pop("type")
+            env_cfg_cls = EnvConfig.get_choice_class(env_type)
+            env_cfg = env_cfg_cls(**env_kwargs)
+            eval_env = make_env(env_cfg, n_envs=cfg.eval.batch_size)
+            env_preprocessor, env_postprocessor = make_env_pre_post_processors(env_cfg, policy_cfg)
         
         dataloader = torch.utils.data.DataLoader(
             dataset,
@@ -116,6 +144,8 @@ def main(cfg: DictConfig):
             
             # log step
             run.log_step(step, loss=loss.item())
+            if use_wandb:
+                wandb.log({"train/loss": loss.item()}, step=step)
             
             if torch.isnan(loss) or torch.isinf(loss):
                 run.log_anomaly("NaN/Inf loss detected", step=step, loss=loss.item())
@@ -123,6 +153,40 @@ def main(cfg: DictConfig):
                 
             if step > 0 and step % 100 == 0:
                 log.info(f"Step {step}/{cfg.train.steps} - loss: {loss.item():.4f}")
+                
+            # Evaluation step
+            if eval_env and cfg.eval.eval_freq > 0 and (step % cfg.eval.eval_freq == 0 or step == cfg.train.steps - 1):
+                log.info(f"Evaluating policy at step {step}...")
+                with torch.no_grad():
+                    # For eval, some policies expect to be in eval mode
+                    policy.eval()
+                    eval_info = eval_policy_all(
+                        envs=eval_env,
+                        policy=policy,
+                        env_preprocessor=env_preprocessor,
+                        env_postprocessor=env_postprocessor,
+                        preprocessor=preprocessor,
+                        postprocessor=postprocessor,
+                        n_episodes=cfg.eval.n_episodes,
+                        videos_dir=output_dir / f"eval/step_{step}",
+                        start_seed=cfg.seed,
+                    )
+                    policy.train()
+                    
+                # Log eval metrics
+                avg_sum_reward = eval_info["overall"]["avg_sum_reward"]
+                pc_success = eval_info["overall"]["pc_success"]
+                log.info(f"Eval results at step {step}: Reward = {avg_sum_reward:.2f}, Success = {pc_success:.2f}%")
+                
+                run.log_step(step, eval_reward=avg_sum_reward, eval_success=pc_success)
+                if use_wandb:
+                    wandb.log({
+                        "eval/reward": avg_sum_reward,
+                        "eval/success": pc_success,
+                    }, step=step)
+
+        if use_wandb:
+            wandb.finish()
 
 if __name__ == "__main__":
     main()
