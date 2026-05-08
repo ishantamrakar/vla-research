@@ -1,0 +1,7 @@
+# @package _global_
+env:
+  type: "pusht"
+  task: "PushT-v0"
+
+dataset:
+  repo_id: "lerobot/pusht"

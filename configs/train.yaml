@@ -1,4 +1,6 @@
 defaults:
+  - env: pusht
+  - policy: diffusion
   - _self_
 
 hydra:
@@ -18,18 +20,6 @@ train:
   batch_size: 8
   num_workers: 4
   grad_clip_norm: 10.0
-
-policy:
-  type: "diffusion"
-  # You can specify other diffusion config overrides here
-
-dataset:
-  repo_id: "lerobot/pusht"
-  # You can add overrides for dataset config if necessary
-
-env:
-  type: "pusht"
-  task: "PushT-v0"
 
 optimizer:
   type: "adamw"
