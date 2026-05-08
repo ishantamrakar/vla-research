@@ -1,0 +1,33 @@
+defaults:
+  - _self_
+
+hydra:
+  run:
+    dir: ${output_dir}
+  job:
+    chdir: false
+
+experiment_name: "default"
+output_dir: "outputs/train/${experiment_name}"
+
+device: "cuda"
+seed: 42
+
+train:
+  steps: 500
+  batch_size: 8
+  num_workers: 4
+  grad_clip_norm: 10.0
+
+policy:
+  type: "diffusion"
+  # You can specify other diffusion config overrides here
+
+dataset:
+  repo_id: "lerobot/pusht"
+  # You can add overrides for dataset config if necessary
+
+optimizer:
+  type: "adamw"
+  lr: 1e-4
+  weight_decay: 1e-4

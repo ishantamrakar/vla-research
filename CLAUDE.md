@@ -61,7 +61,7 @@ working pipeline and compare against a known baseline.
 - [x] Phase 0: Repo init, CLAUDE.md, .gitignore, first commit
 - [x] Phase 1: uv env + LeRobot install + reproduce PushT Diffusion Policy
 - [x] Phase 2: LIBERO + ManiSkill 3 smoke tests
-- [ ] Phase 3: Hydra refactor into template structure
+- [x] Phase 3: Hydra refactor into template structure
 - [ ] Phase 4: Eval harness + W&B integration
 - [ ] Phase 5: Add SmolVLA as second policy
 - [ ] Phase 6: Apptainer + Zaratan SLURM scripts
@@ -72,3 +72,4 @@ working pipeline and compare against a known baseline.
 - Do not leap ahead phases. If asked to do Phase N, do only Phase N.
 - After any meaningful change, run the smoke test and report the output.
 - If a decision is made about stack, conventions, or hardware, append it here.
+- From Phase 3.2 onward, use `scripts/finetune.py` (which wraps `RunContext` natively) instead of `lerobot_train_wrapped.py` for training.
