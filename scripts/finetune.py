@@ -11,6 +11,7 @@ import logging
 import wandb
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.factory import resolve_delta_timestamps
 from lerobot.envs import make_env, make_env_pre_post_processors
 from lerobot.scripts.lerobot_eval import eval_policy_all
 from lerobot.policies import make_policy_config, make_policy, make_pre_post_processors
@@ -45,22 +46,20 @@ def main(cfg: DictConfig):
         
         log.info("Loading dataset...")
         dataset_kwargs = OmegaConf.to_container(cfg.dataset, resolve=True)
-        
+
         log.info("Creating policy config...")
         policy_kwargs = OmegaConf.to_container(cfg.policy, resolve=True)
         policy_type = policy_kwargs.pop("type")
         policy_cfg = make_policy_config(policy_type, **policy_kwargs)
-        
-        # Determine delta_timestamps for dataset from policy config
-        fps = dataset_kwargs.get("fps", 10)  # assume 10 fps if not provided
-        if hasattr(policy_cfg, "observation_delta_indices"):
-            dataset_kwargs["delta_timestamps"] = {
-                "action": [i / fps for i in policy_cfg.action_delta_indices],
-                "observation.image": [i / fps for i in policy_cfg.observation_delta_indices],
-                "observation.state": [i / fps for i in policy_cfg.observation_delta_indices],
-            }
-            
+
+        # Load dataset once to get metadata, then resolve delta_timestamps from
+        # actual feature keys (avoids hardcoding keys like "observation.image"
+        # that differ across datasets).
         dataset = LeRobotDataset(**dataset_kwargs)
+        delta_timestamps = resolve_delta_timestamps(policy_cfg, dataset.meta)
+        if delta_timestamps:
+            dataset_kwargs["delta_timestamps"] = delta_timestamps
+            dataset = LeRobotDataset(**dataset_kwargs)
         
         log.info("Setting up environment...")
         env_kwargs = OmegaConf.to_container(cfg.get("env", {}), resolve=True)
@@ -155,7 +154,7 @@ def main(cfg: DictConfig):
                 log.info(f"Step {step}/{cfg.train.steps} - loss: {loss.item():.4f}")
                 
             # Evaluation step
-            if eval_env and cfg.eval.eval_freq > 0 and (step % cfg.eval.eval_freq == 0 or step == cfg.train.steps - 1):
+            if eval_env and cfg.eval.eval_freq > 0 and ((step + 1) % cfg.eval.eval_freq == 0 or step == cfg.train.steps - 1):
                 log.info(f"Evaluating policy at step {step}...")
                 with torch.no_grad():
                     # For eval, some policies expect to be in eval mode

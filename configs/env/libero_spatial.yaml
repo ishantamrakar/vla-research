@@ -2,6 +2,9 @@
 env:
   type: "libero"
   task: "libero_spatial"
+  camera_name_mapping:
+    agentview_image: "image"
+    robot0_eye_in_hand_image: "wrist_image"
 
 dataset:
   repo_id: "lerobot/libero_spatial_image"

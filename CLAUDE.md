@@ -54,8 +54,9 @@ working pipeline and compare against a known baseline.
 ## Smoke tests
 - **Phase 1 target**: ✅ `uv run lerobot-train --dataset.repo_id=lerobot/pusht --policy.type=diffusion --policy.device=cuda --policy.push_to_hub=false --batch_size=64 --steps=500 --wandb.enable=false --save_checkpoint=false` — loss dropped 0.345 → 0.077 over 500 steps at ~10 steps/s on RTX 3080.
 - **Phase 2 target**: ✅ `uv run lerobot-train --dataset.repo_id=lerobot/libero_spatial_image --policy.type=act --policy.device=cuda --policy.push_to_hub=false --batch_size=8 --steps=500 --wandb.enable=false --save_checkpoint=false` — loss dropped 6.671 → 3.019 over 500 steps (ACT, lr warmup). ManiSkill 3 v3.0.1 GPU-parallel smoke test passed: 4×PickCube-v1 envs stepping on SAPIEN/PhysX.
-- **Phase 4 target**: `uv run python scripts/finetune.py policy=diffusion
+- **Phase 4 target**: `uv run python scripts/finetune.py policy=act
   env=libero_spatial train.steps=500` runs end-to-end and logs to W&B.
+  (DiffusionPolicy is PushT-only; its dual-camera reshape fails on LIBERO eval.)
 
 ## Phase tracker
 - [x] Phase 0: Repo init, CLAUDE.md, .gitignore, first commit
