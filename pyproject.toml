@@ -10,6 +10,7 @@ dependencies = [
     "torchaudio>=2.7.0,<2.11.0",
     "lerobot[training,pusht,diffusion,libero]",
     "mani-skill",
+    "num2words>=0.5.14",
 ]
 
 [tool.uv.sources]

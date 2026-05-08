@@ -1,0 +1,4 @@
+type: "smolvla"
+freeze_vision_encoder: true
+train_expert_only: true
+load_vlm_weights: false
