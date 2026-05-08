@@ -18,8 +18,10 @@ seed: 42
 train:
   steps: 500
   batch_size: 16
-  num_workers: 4
+  num_workers: 8
   grad_clip_norm: 10.0
+  checkpoint_interval: 5000   # steps between checkpoint saves; 0 = disabled
+  render_eval_videos: false    # set true for long runs to capture rollout MP4s
 
 optimizer:
   type: "adamw"
