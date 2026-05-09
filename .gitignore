@@ -39,4 +39,4 @@ checkpoints/
 
 # Secrets
 .env
-.env.local
+.env.localslurm/cluster.env
