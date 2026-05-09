@@ -39,4 +39,9 @@ checkpoints/
 
 # Secrets
 .env
-.env.localslurm/cluster.env
+.env.local
+slurm/cluster.env
+
+# slurm logs
+slurm/logs
+

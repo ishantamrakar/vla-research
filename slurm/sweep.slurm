@@ -10,6 +10,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=02:00:00
+#SBATCH --output=slurm/logs/slurm-%j.out 
+#SBATCH --error=slurm/logs/slurm-%j.err
 
 # ---- load cluster config ----------------------------------------------------
 CLUSTER_ENV="${SLURM_SUBMIT_DIR}/slurm/cluster.env"
@@ -23,8 +25,6 @@ source "$CLUSTER_ENV"
 POLICY="act"
 ENV="libero_spatial"
 SIF=$REPO/apptainer/vla.sif
-LOGDIR=$REPO/slurm/logs
-mkdir -p $LOGDIR
 
 # Clear stale sweep cache entry (tuned for a different GPU on local dev machine)
 python3 -c "
@@ -42,6 +42,7 @@ if cache.exists():
 apptainer exec \
     --nv \
     --bind $SCRATCH:$SCRATCH \
+    --env PATH=/opt/uv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     --env HF_HOME=$SCRATCH/hf_cache \
     --env HF_DATASETS_CACHE=$SCRATCH/hf_cache \
     --env TMPDIR=$SCRATCH/tmp \
@@ -53,4 +54,4 @@ apptainer exec \
         uv sync --quiet
         uv pip install --editable $LEROBOT --quiet
         uv run python scripts/sweep.py policy=$POLICY env=$ENV
-    " 2>&1 | tee $LOGDIR/${SLURM_JOB_ID}-sweep.log
+    "
