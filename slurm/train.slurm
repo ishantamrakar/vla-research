@@ -50,7 +50,7 @@ apptainer exec \
     --nv \
     --bind $SCRATCH:$SCRATCH \
     $WANDB_ENV_FLAG \
-    --env PATH=/opt/uv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    --env PATH=/opt/uv:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     --env HF_HOME=$SCRATCH/hf_cache \
     --env HF_DATASETS_CACHE=$SCRATCH/hf_cache \
     --env TMPDIR=$SCRATCH/tmp \
