@@ -34,8 +34,10 @@ working pipeline and compare against a known baseline.
   - LeRobot sibling clone: ~/Documents/lerobot
 - **Personal M3 MacBook (secondary)**: read-only repo access, light scaffolding,
   documentation. Do NOT run sim or training there.
-- **Zaratan/Nexus-cfar (UMD HPC)**: real training runs, sweeps. Apptainer-based, set up in
-  Phase 6.
+- **UMIACS Nexus-CFAR (UMD HPC)**: real training runs, sweeps. SLURM + Apptainer.
+  Container: `apptainer/vla.def` → `vla.sif`. Job scripts: `slurm/train.slurm`,
+  `slurm/sweep.slurm`. Scratch path: `/scratch/users/$USER`. GPU: A100.
+  (Switched from Zaratan — no free student tier.)
 
 ## VRAM budget reality (10GB)
 - Diffusion Policy / ACT / SmolVLA: fine for fine-tuning, batch ≤ 16
@@ -68,7 +70,7 @@ working pipeline and compare against a known baseline.
 - [x] Phase 3: Hydra refactor into template structure
 - [x] Phase 4: Eval harness + W&B integration
 - [x] Phase 5: Add SmolVLA as second policy
-- [ ] Phase 6: Apptainer + Zaratan SLURM scripts
+- [x] Phase 6: Apptainer + UMIACS Nexus-CFAR SLURM scripts (switched from Zaratan — no free student tier; Nexus-CFAR uses SLURM + Apptainer same as Zaratan would have)
 - [ ] Phase 7+: research-specific scaffolding (planners/, memory/, etc.)
 
 ## Working with Claude Code on this repo
