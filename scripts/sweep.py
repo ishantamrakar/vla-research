@@ -137,7 +137,7 @@ def main(cfg: DictConfig):
                 batch = preprocessor(batch)
 
                 optimizer.zero_grad()
-                with torch.autocast(device_type=device.type, dtype=torch.float16):
+                with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
                     out = policy.forward(batch)
                     loss = out[0] if isinstance(out, tuple) else (out["loss"] if isinstance(out, dict) else out)
                 scaler.scale(loss).backward()

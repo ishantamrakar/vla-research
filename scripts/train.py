@@ -27,7 +27,6 @@ from src.observability import RunContext
 
 log = logging.getLogger(__name__)
 
-BASE_BATCH_SIZE = 8  # LR was tuned for this; larger batches scale LR linearly
 SWEEP_CACHE = Path("outputs/sweep_cache.json")
 
 
@@ -86,13 +85,15 @@ def main(cfg: DictConfig):
         # ---- env -----------------------------------------------------------
         log.info("Setting up environment...")
         env_kwargs = OmegaConf.to_container(cfg.get("env", {}), resolve=True)
-        eval_env = env_preprocessor = env_postprocessor = None
+        # Store env config so we can recreate environments fresh for each eval
+        # (LIBERO's OffScreenRenderEnv.close() deletes self.env, corrupting reuse).
+        eval_env_cfg = None
+        env_preprocessor = env_postprocessor = None
 
         if env_kwargs:
             env_type = env_kwargs.pop("type")
-            env_cfg_obj = EnvConfig.get_choice_class(env_type)(**env_kwargs)
-            eval_env = make_env(env_cfg_obj, n_envs=cfg.eval.batch_size)
-            env_preprocessor, env_postprocessor = make_env_pre_post_processors(env_cfg_obj, policy_cfg)
+            eval_env_cfg = EnvConfig.get_choice_class(env_type)(**env_kwargs)
+            env_preprocessor, env_postprocessor = make_env_pre_post_processors(eval_env_cfg, policy_cfg)
 
         # ---- preprocessors & policy ----------------------------------------
         preprocessor, postprocessor = make_pre_post_processors(
@@ -114,9 +115,11 @@ def main(cfg: DictConfig):
                 "Run sweep.py first to maximize GPU utilization."
             )
 
-        scaled_lr = cfg.optimizer.lr * (batch_size / BASE_BATCH_SIZE)
-        log.info(f"batch_size={batch_size}  lr={scaled_lr:.2e} "
-                 f"(base_lr={cfg.optimizer.lr} × {batch_size}/{BASE_BATCH_SIZE})")
+        # Adam's adaptive second moment absorbs batch-size variance, so the
+        # linear scaling rule (from SGD theory) doesn't apply here. Use the
+        # base LR directly regardless of batch size.
+        scaled_lr = cfg.optimizer.lr
+        log.info(f"batch_size={batch_size}  lr={scaled_lr:.2e} (no LR scaling for AdamW)")
 
         policy.train()
         optimizer = torch.optim.AdamW(
@@ -172,7 +175,7 @@ def main(cfg: DictConfig):
             batch = preprocessor(batch)
 
             optimizer.zero_grad()
-            with torch.autocast(device_type=device.type, dtype=torch.float16):
+            with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
                 out = policy.forward(batch)
                 loss = out[0] if isinstance(out, tuple) else (out["loss"] if isinstance(out, dict) else out)
             scaler.scale(loss).backward()
@@ -214,7 +217,7 @@ def main(cfg: DictConfig):
 
             # ---- eval ------------------------------------------------------
             if (
-                eval_env
+                eval_env_cfg is not None
                 and cfg.eval.eval_freq > 0
                 and ((step + 1) % cfg.eval.eval_freq == 0 or step == cfg.train.steps - 1)
             ):
@@ -222,28 +225,38 @@ def main(cfg: DictConfig):
                 videos_dir = output_dir / f"eval/step_{step + 1}" if render_videos else None
                 max_rendered = cfg.eval.n_episodes if render_videos else 0
 
-                policy.eval()
-                with torch.no_grad():
-                    eval_info = eval_policy_all(
-                        envs=eval_env,
-                        policy=policy,
-                        env_preprocessor=env_preprocessor,
-                        env_postprocessor=env_postprocessor,
-                        preprocessor=preprocessor,
-                        postprocessor=postprocessor,
-                        n_episodes=cfg.eval.n_episodes,
-                        max_episodes_rendered=max_rendered,
-                        videos_dir=videos_dir,
-                        start_seed=cfg.seed,
-                    )
-                policy.train()
-
-                avg_reward = eval_info["overall"]["avg_sum_reward"]
-                pc_success = eval_info["overall"]["pc_success"]
-                log.info(f"Eval step {step + 1}: reward={avg_reward:.2f}  success={pc_success:.1f}%")
-                run.log_step(step, eval_reward=avg_reward, eval_success=pc_success)
-                if use_wandb:
-                    wandb.log({"eval/reward": avg_reward, "eval/success": pc_success}, step=step)
+                # Recreate env fresh — LIBERO's close() deletes internal state,
+                # so reusing env objects across evals causes AttributeError on seed().
+                eval_env = make_env(eval_env_cfg, n_envs=cfg.eval.batch_size)
+                try:
+                    policy.eval()
+                    with torch.no_grad():
+                        eval_info = eval_policy_all(
+                            envs=eval_env,
+                            policy=policy,
+                            env_preprocessor=env_preprocessor,
+                            env_postprocessor=env_postprocessor,
+                            preprocessor=preprocessor,
+                            postprocessor=postprocessor,
+                            n_episodes=cfg.eval.n_episodes,
+                            max_episodes_rendered=max_rendered,
+                            videos_dir=videos_dir,
+                            start_seed=cfg.seed,
+                        )
+                    avg_reward = eval_info["overall"]["avg_sum_reward"]
+                    pc_success = eval_info["overall"]["pc_success"]
+                    log.info(f"Eval step {step + 1}: reward={avg_reward:.2f}  success={pc_success:.1f}%")
+                    run.log_step(step, eval_reward=avg_reward, eval_success=pc_success)
+                    if use_wandb:
+                        wandb.log({"eval/reward": avg_reward, "eval/success": pc_success}, step=step)
+                except Exception as e:
+                    log.warning(f"Eval at step {step + 1} failed (training unaffected): {e}")
+                finally:
+                    policy.train()
+                    try:
+                        eval_env.close()
+                    except Exception:
+                        pass
 
         # ---- final checkpoint ----------------------------------------------
         final_ckpt = checkpoint_dir / f"checkpoint_{cfg.train.steps:07d}_final.pt"
