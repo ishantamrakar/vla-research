@@ -72,6 +72,7 @@ working pipeline and compare against a known baseline.
 - [x] Phase 5: Add SmolVLA as second policy
 - [x] Phase 6: Apptainer + UMIACS Nexus-CFAR SLURM scripts (switched from Zaratan — no free student tier; Nexus-CFAR uses SLURM + Apptainer same as Zaratan would have)
 - [ ] Phase 7+: research-specific scaffolding (planners/, memory/, etc.)
+- [ ] Future: multi-GPU distributed training (PyTorch DDP) — requires gradient sync, adjusted LR scaling, SLURM multi-node or --ntasks-per-node; unlock once single-GPU baseline is solid
 
 ## Working with Claude Code on this repo
 - Start each session by reading this file and the current phase status.

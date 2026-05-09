@@ -1,18 +1,8 @@
 #!/bin/bash
 # =============================================================================
 # GPU batch-size sweep — run once before train.slurm on a new GPU type.
-# Clears the cached batch size for this policy+dataset so it re-probes
-# for the current hardware (local dev result is not valid on a different GPU).
+# Submit from repo root: sbatch slurm/sweep.slurm
 # =============================================================================
-
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-if [ ! -f "$SCRIPT_DIR/cluster.env" ]; then
-    echo "ERROR: slurm/cluster.env not found."
-    echo "Copy slurm/cluster.env.example to slurm/cluster.env and fill in your values."
-    exit 1
-fi
-source "$SCRIPT_DIR/cluster.env"
-
 #SBATCH --job-name=vla-sweep
 #SBATCH --partition=scavenger
 #SBATCH --account=scavenger
@@ -20,8 +10,15 @@ source "$SCRIPT_DIR/cluster.env"
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=02:00:00
-#SBATCH --output=/tmp/vla-sweep-%j.out
-#SBATCH --error=/tmp/vla-sweep-%j.err
+
+# ---- load cluster config ----------------------------------------------------
+CLUSTER_ENV="${SLURM_SUBMIT_DIR}/slurm/cluster.env"
+if [ ! -f "$CLUSTER_ENV" ]; then
+    echo "ERROR: slurm/cluster.env not found."
+    echo "Copy slurm/cluster.env.example to slurm/cluster.env and fill in your values."
+    exit 1
+fi
+source "$CLUSTER_ENV"
 
 POLICY="act"
 ENV="libero_spatial"

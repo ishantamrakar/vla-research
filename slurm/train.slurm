@@ -1,23 +1,9 @@
 #!/bin/bash
 # =============================================================================
 # VLA training job
-# Reads cluster config from slurm/cluster.env (copy from cluster.env.example).
-#
-# Submit:  sbatch slurm/train.slurm
-# Monitor: squeue --user $USER
-# Resume:  just resubmit — train.py picks up from checkpoint_latest.pt
+# Submit from repo root: sbatch slurm/train.slurm
+# Resume: just resubmit — train.py picks up from checkpoint_latest.pt
 # =============================================================================
-
-# ---- load cluster config ----------------------------------------------------
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-if [ ! -f "$SCRIPT_DIR/cluster.env" ]; then
-    echo "ERROR: slurm/cluster.env not found."
-    echo "Copy slurm/cluster.env.example to slurm/cluster.env and fill in your values."
-    exit 1
-fi
-source "$SCRIPT_DIR/cluster.env"
-
-# ---- SLURM directives (use cluster.env values) ------------------------------
 #SBATCH --job-name=vla-train
 #SBATCH --partition=scavenger
 #SBATCH --account=scavenger
@@ -25,12 +11,15 @@ source "$SCRIPT_DIR/cluster.env"
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=1-00:00:00
-#SBATCH --output=/tmp/vla-train-%j.out
-#SBATCH --error=/tmp/vla-train-%j.err
-# Note: SLURM directives above are defaults. The actual values come from
-# cluster.env via the srun call inside, but #SBATCH lines are parsed before
-# the script runs. After setting up cluster.env, regenerate directives with:
-#   bash slurm/gen_headers.sh  (or just edit the #SBATCH lines above manually)
+
+# ---- load cluster config ----------------------------------------------------
+CLUSTER_ENV="${SLURM_SUBMIT_DIR}/slurm/cluster.env"
+if [ ! -f "$CLUSTER_ENV" ]; then
+    echo "ERROR: slurm/cluster.env not found."
+    echo "Copy slurm/cluster.env.example to slurm/cluster.env and fill in your values."
+    exit 1
+fi
+source "$CLUSTER_ENV"
 
 # ---- experiment config — edit before submitting ----------------------------
 EXPERIMENT="act_libero_spatial_50k"
@@ -51,16 +40,12 @@ LOGDIR=$REPO/slurm/logs
 mkdir -p $OUTPUTS/train $LOGDIR
 
 # ---- W&B auth ---------------------------------------------------------------
-# ~/.netrc is auto-mounted by Apptainer (home dir bind). No extra config needed.
-# If your cluster does not mount $HOME, set WANDB_API_KEY in cluster.env.
 WANDB_ENV_FLAG=""
 if [ -n "$WANDB_API_KEY" ]; then
     WANDB_ENV_FLAG="--env WANDB_API_KEY=$WANDB_API_KEY"
 fi
 
 # ---- run inside container ---------------------------------------------------
-# Scratch is identity-mounted (same path inside and outside the container).
-# $HOME (/nfshomes/<user>) is auto-mounted by Apptainer — covers .netrc, .gitconfig.
 apptainer exec \
     --nv \
     --bind $SCRATCH:$SCRATCH \
