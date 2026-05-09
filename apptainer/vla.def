@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: nvidia/cuda:12.6.0-devel-ubuntu22.04
+From: nvidia/cuda:12.6.0-devel-ubuntu24.04
 
 %labels
     Author vla-research
@@ -8,7 +8,6 @@ From: nvidia/cuda:12.6.0-devel-ubuntu22.04
 %environment
     export DEBIAN_FRONTEND=noninteractive
     export UV_NO_PROGRESS=1
-    # Keep HF and uv caches on scratch (bound at runtime via SLURM script)
     export HF_HOME=${SCRATCH}/hf_cache
     export UV_CACHE_DIR=${SCRATCH}/uv_cache
     export PATH=/opt/uv/bin:$PATH
@@ -16,7 +15,6 @@ From: nvidia/cuda:12.6.0-devel-ubuntu22.04
 %post
     export DEBIAN_FRONTEND=noninteractive
 
-    # ---- system deps -------------------------------------------------------
     apt-get update && apt-get install -y --no-install-recommends \
         git \
         curl \
@@ -24,31 +22,25 @@ From: nvidia/cuda:12.6.0-devel-ubuntu22.04
         python3.12 \
         python3.12-dev \
         python3.12-venv \
-        python3-pip \
-        # MuJoCo / GL deps for LIBERO headless rendering
-        libgl1-mesa-glx \
+        libgl1 \
         libgl1-mesa-dri \
-        libgles2-mesa \
+        libgles2 \
         libglfw3 \
         libglew-dev \
         libosmesa6 \
         libosmesa6-dev \
         libglu1-mesa \
         patchelf \
-        # general
         build-essential \
         cmake \
         ffmpeg \
         && rm -rf /var/lib/apt/lists/*
 
-    # Make python3.12 the default python3
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
-    update-alternatives --install /usr/bin/python python python3.12 1
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
 
-    # ---- uv ----------------------------------------------------------------
     curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/opt/uv sh
 
-    # ---- MuJoCo (required by LIBERO / robosuite) ---------------------------
     mkdir -p /root/.mujoco
     wget -q https://github.com/google-deepmind/mujoco/releases/download/2.3.7/mujoco-2.3.7-linux-x86_64.tar.gz \
         -O /tmp/mujoco.tar.gz
@@ -57,24 +49,17 @@ From: nvidia/cuda:12.6.0-devel-ubuntu22.04
     echo 'export MUJOCO_GL=osmesa' >> /etc/environment
     echo 'export LD_LIBRARY_PATH=/root/.mujoco/mujoco-2.3.7/lib:$LD_LIBRARY_PATH' >> /etc/environment
 
-    # ---- workspace placeholder ---------------------------------------------
-    # The actual repo and lerobot source are bind-mounted at runtime.
-    # uv sync runs at job start inside the SLURM script, so no Python packages
-    # are installed at build time (keeps the .sif transferable and up-to-date
-    # with whatever is on the cluster checkout).
     mkdir -p /workspace /lerobot
 
 %runscript
-    # Default: drop into bash. SLURM script overrides this with the actual command.
     exec bash "$@"
 
 %help
     VLA research container — PyTorch cu126, headless GL for LIBERO.
 
     Runtime bind mounts expected (set by slurm/train.slurm):
-      $HOME/vla-research  → /workspace
-      $HOME/lerobot       → /lerobot
-      $SCRATCH            → /scratch  (HF cache, uv cache, outputs)
+      $SCRATCH  → $SCRATCH  (identity mount: HF cache, uv cache, outputs)
+      $HOME     → auto-mounted by Apptainer (.netrc, .gitconfig)
 
     First run on a new cluster node:
-      apptainer exec --nv vla.sif bash -c "cd /workspace && uv sync"
+      apptainer exec --nv vla.sif bash -c "cd $REPO && uv sync"
