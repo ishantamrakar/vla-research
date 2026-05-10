@@ -59,20 +59,7 @@ apptainer exec \
         cd $REPO
         uv sync --quiet
         uv pip install --editable $LEROBOT --quiet
-
-        # Pre-write LIBERO config to suppress the interactive first-run prompt.
-        # All paths default to files bundled inside the package — no data download needed.
-        # (The HF training dataset goes to \$SCRATCH/hf_cache via HF_HOME above.)
-        uv run python -c "
-import pathlib, yaml
-cfg = pathlib.Path('$SCRATCH/.libero/config.yaml')
-cfg.parent.mkdir(parents=True, exist_ok=True)
-if not cfg.exists():
-    from libero.libero import get_default_path_dict
-    cfg.write_text(yaml.dump(get_default_path_dict()))
-    print('LIBERO config written to', cfg)
-"
-
+        uv run python scripts/setup_libero.py
         uv run lerobot-train \
             --dataset.repo_id=lerobot/libero_spatial_image \
             --policy.type=act \
