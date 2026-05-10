@@ -22,8 +22,8 @@ from lerobot.policies import make_policy_config, make_policy, make_pre_post_proc
 
 log = logging.getLogger(__name__)
 
-SWEEP_CANDIDATES = [8, 16, 32, 64, 96, 128, 192, 256]
-SWEEP_STEPS = 100
+SWEEP_CANDIDATES = [8, 16, 32, 64, 96, 128, 256, 512, 640, 786, 896, 1024]
+SWEEP_STEPS = 1
 VRAM_HEADROOM_GB = 1.5
 SWEEP_CACHE = Path("outputs/sweep_cache.json")
 

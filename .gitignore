@@ -44,4 +44,6 @@ slurm/cluster.env
 
 # slurm logs
 slurm/logs
+*.out
+*.err
 

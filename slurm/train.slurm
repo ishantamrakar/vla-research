@@ -11,6 +11,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=1-00:00:00
+#SBATCH --output=slurm/logs/train-%j.out
+#SBATCH --error=slurm/logs/train-%j.err
 
 # ---- load cluster config ----------------------------------------------------
 CLUSTER_ENV="${SLURM_SUBMIT_DIR}/slurm/cluster.env"
@@ -35,9 +37,6 @@ WANDB_ENABLE="true"
 # ---- derived paths ----------------------------------------------------------
 SIF=$REPO/apptainer/vla.sif
 OUTPUTS=$SCRATCH/vla-outputs
-LOGDIR=$REPO/slurm/logs
-
-mkdir -p $OUTPUTS/train $LOGDIR
 
 # ---- W&B auth ---------------------------------------------------------------
 WANDB_ENV_FLAG=""
@@ -51,6 +50,7 @@ apptainer exec \
     --bind $SCRATCH:$SCRATCH \
     $WANDB_ENV_FLAG \
     --env PATH=/opt/uv:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    --env PYTHONPATH=$REPO \
     --env HF_HOME=$SCRATCH/hf_cache \
     --env HF_DATASETS_CACHE=$SCRATCH/hf_cache \
     --env TMPDIR=$SCRATCH/tmp \
@@ -73,4 +73,4 @@ apptainer exec \
             experiment_name=$EXPERIMENT \
             output_dir=$OUTPUTS/train/$EXPERIMENT \
             wandb.enable=$WANDB_ENABLE
-    " 2>&1 | tee $LOGDIR/${SLURM_JOB_ID}-train.log
+    "
