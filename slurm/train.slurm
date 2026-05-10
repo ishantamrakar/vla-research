@@ -2,7 +2,7 @@
 # =============================================================================
 # VLA training job — uses lerobot-train directly (ACT built-in hyperparameters)
 # Submit from repo root: sbatch slurm/train.slurm
-# Resume: resubmit with --resume flag (uncomment below)
+# To resume from the last checkpoint: set RESUME=true below and resubmit.
 # =============================================================================
 #SBATCH --job-name=vla-train
 #SBATCH --partition=scavenger
@@ -31,9 +31,25 @@ EVAL_FREQ=50000
 N_EPISODES=10
 WANDB_ENABLE="true"
 
+# ---- set to true to resume from the last checkpoint -------------------------
+RESUME=true
+
 # ---- derived paths ----------------------------------------------------------
 SIF=$REPO/apptainer/vla.sif
-OUTPUTS=$SCRATCH/vla-outputs
+OUTPUTS=$REPO/outputs
+CKPT_PATH=$OUTPUTS/train/$EXPERIMENT/checkpoints/last/pretrained_model/train_config.json
+
+# ---- build resume flags (empty for a fresh run) -----------------------------
+RESUME_FLAGS=""
+if [ "$RESUME" = "true" ]; then
+    if [ ! -f "$CKPT_PATH" ]; then
+        echo "ERROR: RESUME=true but checkpoint not found at $CKPT_PATH"
+        echo "Either set RESUME=false for a fresh run or check the checkpoint path."
+        exit 1
+    fi
+    RESUME_FLAGS="--resume --config_path=$CKPT_PATH"
+    echo "Resuming from checkpoint: $CKPT_PATH"
+fi
 
 # ---- stage dataset to RAM disk (/dev/shm) -----------------------------------
 # Fixes two problems at once:
@@ -82,6 +98,7 @@ apptainer exec \
             --policy.type=act \
             --env.type=libero \
             --env.task=libero_spatial \
+            --env.camera_name_mapping='{\"robot0_eye_in_hand_image\": \"wrist_image\"}' \
             --output_dir=$OUTPUTS/train/$EXPERIMENT \
             --job_name=$EXPERIMENT \
             --steps=$STEPS \
@@ -90,9 +107,6 @@ apptainer exec \
             --eval.n_episodes=$N_EPISODES \
             --num_workers=8 \
             --wandb.enable=$WANDB_ENABLE \
-            --policy.push_to_hub=false
+            --policy.push_to_hub=false \
+            $RESUME_FLAGS
     "
-    # To resume a previous run, replace the lerobot-train call above with:
-    # uv run lerobot-train \
-    #     --resume \
-    #     --config_path=$OUTPUTS/train/$EXPERIMENT/checkpoints/last/pretrained_model/train_config.json

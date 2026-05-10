@@ -83,6 +83,19 @@ scp apptainer/vla.sif <user>@nexus.umiacs.umd.edu:$REPO/apptainer/
 rsync -av ~/Documents/lerobot/ <user>@nexus.umiacs.umd.edu:$LEROBOT/
 ```
 
+**One-time auth tokens** (add to `~/.bashrc` on the cluster, then `source ~/.bashrc`):
+
+```bash
+# Required for W&B logging
+echo 'export WANDB_API_KEY=your_wandb_key' >> ~/.bashrc
+
+# Recommended: avoids HuggingFace rate limits during dataset/asset downloads
+# Get a read token at https://huggingface.co/settings/tokens
+echo 'export HUGGING_FACE_HUB_TOKEN=hf_yourtoken' >> ~/.bashrc
+
+source ~/.bashrc
+```
+
 **Submit a training job:**
 
 ```bash
@@ -93,6 +106,57 @@ squeue --user $USER
 Edit the variables at the top of `slurm/train.slurm` to change steps, eval frequency, or experiment name. Outputs land in `$SCRATCH/vla-outputs/`.
 
 **Resume a preempted job** — uncomment the `--resume` block at the bottom of `train.slurm` and resubmit.
+
+---
+
+## HPC gotchas
+
+Issues discovered running on UMIACS Nexus-CFAR (SLURM + Apptainer + Lustre scratch). Likely to affect any similar HPC environment.
+
+**Eval crashes with `KeyError: 'observation.images.wrist_image'`**
+
+The LIBERO env's default camera name mapping uses `image2` for the eye-in-hand camera, but the `lerobot/libero_spatial_image` dataset names it `wrist_image`. The trained ACT policy looks for `wrist_image` during eval and crashes. Fix: pass `--env.camera_name_mapping='{"robot0_eye_in_hand_image": "wrist_image"}'` to `lerobot-train`. This is already included in `train.slurm`.
+
+**LIBERO interactive prompt hangs the job**
+
+On first import, LIBERO asks "Do you want to specify a custom path?" interactively. In a non-interactive SLURM job this hangs forever. `train.slurm` runs `scripts/setup_libero.py` before training, which writes `~/.libero/config.yaml` without importing LIBERO (uses `importlib.util.find_spec` to locate the package). If you use a different job script, call this first:
+
+```bash
+uv run python scripts/setup_libero.py
+```
+
+**LIBERO simulator assets are not in the pip package**
+
+The `libero` pip package ships an empty `assets/` directory. The sim needs XML scene files and 3D meshes to run eval. `setup_libero.py` downloads them from `lerobot/libero-assets` directly into the venv's assets directory (which lives on `$SCRATCH`, not the NFS home). This is a one-time ~10 minute download; subsequent jobs skip it.
+
+**DataLoader workers crash with bus error on Lustre**
+
+PyTorch DataLoader workers memory-map dataset files. Lustre (and similar network filesystems) occasionally return `SIGBUS` under load, killing workers mid-training. `train.slurm` copies the entire HF dataset cache to `/dev/shm` (RAM disk) before training. `/dev/shm` is a standard Linux tmpfs — always present, no setup needed. Make sure your job requests enough RAM: dataset (~40 GB) + model + OS headroom. The script requests 96 GB.
+
+**Output directory already exists error**
+
+`lerobot-train` refuses to overwrite an existing output directory unless `--resume` is set. If a job fails before training starts, the directory is already created. Delete it before resubmitting:
+
+```bash
+rm -rf $SCRATCH/vla-outputs/train/<experiment_name>
+```
+
+**LIBERO asset downloads fail on NFS home**
+
+When the eval env initialises for the first time, LIBERO tries to download missing assets to `~/.cache/libero/`. On clusters where home is NFS-mounted, this fails with `Stale file handle`. `setup_libero.py` avoids this by downloading directly to the venv's `assets/` directory (on `$SCRATCH`) before the job starts.
+
+**`HF_HOME` and `UV_CACHE_DIR` must point to scratch**
+
+The default `~/.cache/huggingface` and `~/.cache/uv` are on NFS home, which is typically small and slow. `train.slurm` sets both to `$SCRATCH` via environment variables passed to `apptainer exec`. If you write your own job script, include:
+
+```bash
+--env HF_HOME=$SCRATCH/hf_cache \
+--env UV_CACHE_DIR=$SCRATCH/uv_cache \
+```
+
+**`LIBERO_CONFIG_PATH` must point to scratch**
+
+Same reason — `~/.libero/` defaults to NFS home. `train.slurm` sets `LIBERO_CONFIG_PATH=$SCRATCH/.libero` so the config file lands on scratch.
 
 ---
 
