@@ -9,7 +9,7 @@
 #SBATCH --account=scavenger
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --mem=96G
 #SBATCH --time=1-00:00:00
 #SBATCH --output=slurm/logs/train-%j.out
 #SBATCH --error=slurm/logs/train-%j.err
@@ -35,6 +35,23 @@ WANDB_ENABLE="true"
 SIF=$REPO/apptainer/vla.sif
 OUTPUTS=$SCRATCH/vla-outputs
 
+# ---- stage dataset to RAM disk (/dev/shm) -----------------------------------
+# Fixes two problems at once:
+#   1. data_s drops from ~0.67s to ~0.05s (no network I/O during training)
+#   2. eliminates the DataLoader bus error (mmap on Lustre fails under load;
+#      mmap on RAM never does)
+# /dev/shm is a standard Linux RAM-backed tmpfs — always present, no setup needed.
+# With 96GB RAM and a ~40GB hub cache, there is comfortable headroom.
+HF_RAM=/dev/shm/hf_cache
+if [ ! -d "$HF_RAM/hub" ]; then
+    echo "Staging HF cache to /dev/shm (RAM disk)..."
+    mkdir -p "$HF_RAM"
+    cp -r "$SCRATCH/hf_cache/hub" "$HF_RAM/"
+    echo "Staging complete: $(du -sh $HF_RAM | cut -f1) in RAM."
+else
+    echo "HF cache already staged in /dev/shm, skipping copy."
+fi
+
 # ---- W&B auth ---------------------------------------------------------------
 WANDB_ENV_FLAG=""
 if [ -n "$WANDB_API_KEY" ]; then
@@ -48,8 +65,8 @@ apptainer exec \
     $WANDB_ENV_FLAG \
     --env PATH=/opt/uv:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     --env PYTHONPATH=$REPO \
-    --env HF_HOME=$SCRATCH/hf_cache \
-    --env HF_DATASETS_CACHE=$SCRATCH/hf_cache \
+    --env HF_HOME=$HF_RAM \
+    --env HF_DATASETS_CACHE=$HF_RAM \
     --env TMPDIR=$SCRATCH/tmp \
     --env UV_CACHE_DIR=$SCRATCH/uv_cache \
     --env MUJOCO_GL=osmesa \
@@ -71,6 +88,7 @@ apptainer exec \
             --save_freq=$SAVE_FREQ \
             --eval_freq=$EVAL_FREQ \
             --eval.n_episodes=$N_EPISODES \
+            --num_workers=8 \
             --wandb.enable=$WANDB_ENABLE \
             --policy.push_to_hub=false
     "
