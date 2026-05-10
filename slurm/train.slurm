@@ -98,7 +98,7 @@ apptainer exec \
             --policy.type=act \
             --env.type=libero \
             --env.task=libero_spatial \
-            --env.camera_name_mapping='{\"robot0_eye_in_hand_image\": \"wrist_image\"}' \
+            --env.camera_name_mapping='{\"agentview_image\": \"image\", \"robot0_eye_in_hand_image\": \"wrist_image\"}' \
             --output_dir=$OUTPUTS/train/$EXPERIMENT \
             --job_name=$EXPERIMENT \
             --steps=$STEPS \

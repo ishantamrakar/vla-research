@@ -32,7 +32,7 @@ WANDB_ENABLE="false"
 
 # ---- derived paths ----------------------------------------------------------
 SIF=$REPO/apptainer/vla.sif
-OUTPUTS=$SCRATCH/vla-outputs
+OUTPUTS=$REPO/outputs
 POLICY_PATH=$OUTPUTS/train/$EXPERIMENT/checkpoints/$CHECKPOINT/pretrained_model
 EVAL_OUTPUT=$REPO/outputs/eval/${EXPERIMENT}_${CHECKPOINT}
 
@@ -72,7 +72,7 @@ apptainer exec \
             --policy.path=$POLICY_PATH \
             --env.type=libero \
             --env.task=libero_spatial \
-            --env.camera_name_mapping='{\"robot0_eye_in_hand_image\": \"wrist_image\"}' \
+            --env.camera_name_mapping='{\"agentview_image\": \"image\", \"robot0_eye_in_hand_image\": \"wrist_image\"}' \
             --eval.n_episodes=$N_EPISODES \
             --policy.device=cuda \
             --output_dir=$EVAL_OUTPUT
