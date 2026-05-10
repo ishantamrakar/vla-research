@@ -1,233 +1,164 @@
 # vla-research
 
-A personal research template for vision-language-action (VLA) and imitation
-learning experiments on single-arm manipulation in simulation. The default
-workflow is **fine-tuning from a public checkpoint**, not training from scratch.
+A minimal research scaffold for vision-language-action (VLA) and imitation learning experiments on single-arm manipulation in simulation.
 
-Designed to make new ideas — alternative action heads, planners, memory
-modules, test-time compute — trivial to drop into a working pipeline and
-compare against a known baseline. If you are starting a VLA project and want
-a clean, opinionated starting point, clone this.
+**The baseline is one command.** Everything else in this repo exists to make it easy to swap in a new idea — a different action head, a memory module, a planner — and compare it against that baseline.
 
 ---
 
-## Features
+## How it works
 
-- **Multi-policy support** — ACT, Diffusion Policy, SmolVLA out of the box;
-  adding a new policy is one config file
-- **Multi-env support** — LIBERO (primary), ManiSkill 3, PushT; adding a new
-  env is one config file
-- **Hydra config** — every experiment is fully reproducible from its CLI
-  override string
-- **GPU utilization sweep** — `sweep.py` probes VRAM at increasing batch sizes
-  and caches the result; `train.py` reads it automatically
-- **bfloat16 AMP** — mixed-precision training with no overflow risk
-- **Checkpointing + resume** — numbered checkpoints + `checkpoint_latest.pt`;
-  interrupted runs resume from where they stopped
-- **W&B integration** — loss, eval reward, success rate, and VRAM logged
-- **Eval harness** — vectorized rollout across all LIBERO tasks via LeRobot's
-  `eval_policy_all`; optional video recording
-- **Observability** — every run writes `summary.json` (status, loss history,
-  VRAM peak, errors); `verify_run.py` checks it
+[LeRobot](https://github.com/huggingface/lerobot) provides the policies, datasets, training loop, and eval harness. This repo provides:
+
+- **Configs** — one YAML per environment, one per policy; mix and match
+- **HPC setup** — Apptainer container + SLURM scripts for GPU clusters
+- **Custom training hook** — `scripts/finetune.py` for when you need to inject research code into the training loop
+- **`src/`** — where new modules live (planners, memory, novel action heads)
 
 ---
 
-## Hardware target
+## Setup
 
-Developed and tested on an RTX 3080 (10 GB VRAM). Long training runs use
-UMD's Zaratan HPC cluster (A100s) via the Apptainer container in
-`apptainer/`.
-
----
-
-## Prerequisites
-
-### System
+**Prerequisites**
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) — `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- CUDA 12.6 driver (cu126 wheels; driver ≥ 525 required)
-- (HPC only) Apptainer ≥ 1.1
+- CUDA 12.6+ driver
 
-### Sibling repositories
-
-Clone these **next to** this repo (same parent directory):
+**Clone the sibling repos** (must be next to this one):
 
 ```bash
-# LeRobot — installed editable so you can read and patch their code
 git clone https://github.com/huggingface/lerobot.git ../lerobot
-
-# LIBERO — sim environment
 git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git ../LIBERO
 ```
 
----
-
-## Installation
+**Install:**
 
 ```bash
-git clone <this-repo> vla-research
+git clone https://github.com/ishan-tamrakar/vla-research.git
 cd vla-research
 uv sync
 ```
 
-`uv sync` reads `pyproject.toml`, pulls the cu126 PyTorch wheels, and installs
-LeRobot editable from `../lerobot`. Everything lands in `.venv/`.
-
-**One-time LIBERO setup** — create `~/.libero/config.yaml` to suppress the
-interactive prompt on first import:
-
-```bash
-mkdir -p ~/.libero
-python - <<'EOF'
-from pathlib import Path
-import shutil, libero
-src = Path(libero.__file__).parent / "default_config.yaml"
-dst = Path.home() / ".libero/config.yaml"
-if not dst.exists():
-    shutil.copy(src, dst)
-    print("LIBERO config written to", dst)
-else:
-    print("Already exists:", dst)
-EOF
-```
+Everything lands in `.venv/`. LeRobot is installed editable from `../lerobot`.
 
 ---
 
-## Quickstart
+## Baseline training
 
-Verify the stack with a 500-step smoke test (no W&B, no eval):
+ACT on LIBERO Spatial — the default baseline:
+
+```bash
+uv run lerobot-train \
+  --dataset.repo_id=lerobot/libero_spatial_image \
+  --policy.type=act \
+  --env.type=libero \
+  --env.task=libero_spatial \
+  --output_dir=outputs/train/act_libero_spatial \
+  --job_name=act_libero_spatial \
+  --wandb.enable=true \
+  --policy.push_to_hub=false
+```
+
+This uses ACT's built-in training preset: `lr=1e-5`, `batch_size=8`, `steps=100k`. No config files needed — `lerobot-train` handles everything.
+
+---
+
+## Running on a GPU cluster (SLURM + Apptainer)
+
+**One-time setup:**
+
+```bash
+# 1. Build the container on a Linux machine with root (≈15 min)
+apptainer build --fakeroot apptainer/vla.sif apptainer/vla.def
+
+# 2. Copy cluster.env.example and fill in your paths
+cp slurm/cluster.env.example slurm/cluster.env
+# edit SCRATCH, REPO, LEROBOT
+
+# 3. Transfer everything to the cluster
+rsync -av --exclude='.venv' --exclude='outputs' --exclude='wandb' \
+  . <user>@nexus.umiacs.umd.edu:$REPO/
+scp apptainer/vla.sif <user>@nexus.umiacs.umd.edu:$REPO/apptainer/
+rsync -av ~/Documents/lerobot/ <user>@nexus.umiacs.umd.edu:$LEROBOT/
+```
+
+**Submit a training job:**
+
+```bash
+sbatch slurm/train.slurm
+squeue --user $USER
+```
+
+Edit the variables at the top of `slurm/train.slurm` to change steps, eval frequency, or experiment name. Outputs land in `$SCRATCH/vla-outputs/`.
+
+**Resume a preempted job** — uncomment the `--resume` block at the bottom of `train.slurm` and resubmit.
+
+---
+
+## Smoke tests
+
+Verify the stack locally (no W&B, no eval, 500 steps):
 
 ```bash
 # PushT + Diffusion Policy
-uv run python scripts/finetune.py \
-  policy=diffusion env=pusht \
-  train.steps=500 wandb.enable=false experiment_name=smoke_pusht
+uv run lerobot-train \
+  --dataset.repo_id=lerobot/pusht \
+  --policy.type=diffusion \
+  --policy.device=cuda \
+  --policy.push_to_hub=false \
+  --batch_size=64 \
+  --steps=500 \
+  --wandb.enable=false \
+  --save_checkpoint=false
 
 # LIBERO Spatial + ACT
-uv run python scripts/finetune.py \
-  policy=act env=libero_spatial \
-  train.steps=500 wandb.enable=false experiment_name=smoke_libero
+uv run lerobot-train \
+  --dataset.repo_id=lerobot/libero_spatial_image \
+  --policy.type=act \
+  --policy.device=cuda \
+  --policy.push_to_hub=false \
+  --steps=500 \
+  --wandb.enable=false \
+  --save_checkpoint=false
 ```
 
 Both should complete without error and show steadily falling loss.
 
 ---
 
-## Training
+## Adding a new environment or policy
 
-### Step 1 — find the optimal batch size (once per policy × dataset)
-
-```bash
-uv run python scripts/sweep.py policy=act env=libero_spatial
+**New policy** — create `configs/policy/<name>.yaml`:
+```yaml
+type: "<lerobot_policy_type>"
 ```
+Pass `--policy.type=<name>` on the CLI.
 
-Result is cached in `outputs/sweep_cache.json`. Skip this step if the cache
-already has an entry for your combination.
+**New environment** — create `configs/env/<name>.yaml`:
+```yaml
+# env-specific overrides as needed
+```
+Pass `--env.type=<name> --env.task=<task>` on the CLI.
 
-### Step 2 — run training
+If the policy or env isn't in LeRobot yet, implement it in `src/` and register it with the LeRobot plugin system.
+
+---
+
+## Custom training loop
+
+When you need to inject research code (a new loss term, a custom action head, mid-loop logging), use `scripts/finetune.py` instead of `lerobot-train`:
 
 ```bash
-uv run python scripts/train.py \
+uv run python scripts/finetune.py \
   policy=act \
   env=libero_spatial \
   train.steps=50000 \
-  train.checkpoint_interval=5000 \
-  eval.eval_freq=25000 \
-  eval.n_episodes=5 \
-  experiment_name=act_libero_spatial_50k \
+  experiment_name=my_experiment \
   wandb.enable=true
 ```
 
-Training resumes automatically if
-`outputs/train/<experiment_name>/checkpoints/checkpoint_latest.pt` exists —
-interrupted runs restart with the same command.
-
-### Key config knobs
-
-| Override | Default | Notes |
-|---|---|---|
-| `train.steps` | 500 | Total gradient steps |
-| `train.checkpoint_interval` | 5000 | Steps between numbered checkpoints |
-| `train.render_eval_videos` | false | Set true to record MP4s during eval |
-| `eval.eval_freq` | 500 | Steps between eval calls; 0 = disabled |
-| `eval.n_episodes` | 5 | Episodes per task during eval |
-| `optimizer.lr` | 1e-4 | Not scaled with batch size (AdamW) |
-| `wandb.enable` | true | Set false for smoke tests |
-
----
-
-## Adding a new policy
-
-1. Confirm the policy is supported by LeRobot
-   (`lerobot.policies.make_policy_config`).
-2. Create `configs/policy/<name>.yaml`:
-   ```yaml
-   type: "<lerobot_policy_type>"
-   # any policy-specific kwargs
-   ```
-3. Pass `policy=<name>` on the CLI. Done.
-
-The training loop is policy-agnostic — it calls `make_policy_config`,
-`make_policy`, and `make_pre_post_processors` from LeRobot, which dispatch
-on `type`.
-
----
-
-## Adding a new environment
-
-1. Confirm the env is supported by LeRobot (`lerobot.envs.EnvConfig`).
-2. Create `configs/env/<name>.yaml` with `# @package _global_` at the top:
-   ```yaml
-   # @package _global_
-   env:
-     type: "<lerobot_env_type>"
-     task: "<task_name>"
-     # env-specific kwargs (e.g. camera_name_mapping for LIBERO)
-
-   dataset:
-     repo_id: "hf_org/dataset_name"
-   ```
-3. Pass `env=<name>` on the CLI. Done.
-
-The `# @package _global_` directive is required — it lets a single file set
-both `env.*` and `dataset.*` in the Hydra config tree.
-
----
-
-## Running on HPC (UMIACS Nexus-CFAR)
-
-See [`apptainer/`](apptainer/) for the container definition and
-[`slurm/`](slurm/) for job scripts.
-
-```bash
-# 1. Build container on your local Linux machine (once, ~15 min)
-apptainer build --fakeroot apptainer/vla.sif apptainer/vla.def
-
-# 2. Transfer to Nexus
-rsync -av --exclude='.venv' --exclude='outputs' --exclude='wandb' \
-  . <user>@nexus.umiacs.umd.edu:~/vla-research/
-scp apptainer/vla.sif <user>@nexus.umiacs.umd.edu:~/vla-research/apptainer/
-# Also transfer the sibling lerobot clone if not already there:
-rsync -av ~/Documents/lerobot/ <user>@nexus.umiacs.umd.edu:~/lerobot/
-
-# 3. On the Nexus login node — add W&B key (once)
-echo 'export WANDB_API_KEY=your_key_here' >> ~/.bashrc && source ~/.bashrc
-
-# 4. Run the batch-size sweep (once per GPU type, ~1-2 hr)
-sbatch slurm/sweep.slurm
-
-# 5. Submit training
-sbatch slurm/train.slurm
-
-# Monitor
-squeue --user $USER
-```
-
-The SLURM scripts default to L40S (48 GB) on the scavenger partition.
-Outputs land on scratch (`/fs/nexus-scratch/<user>/vla-outputs/`) and are
-rsynced back to the repo on job exit. Training resumes automatically from
-`checkpoint_latest.pt` if the job is preempted — just resubmit.
+This wraps LeRobot's policy/dataset/eval stack with a Hydra config and `RunContext` (writes `outputs/.../summary.json` after every run). Extend the training loop in `finetune.py` to add your custom logic.
 
 ---
 
@@ -236,41 +167,39 @@ rsynced back to the repo on job exit. Training resumes automatically from
 ```
 vla-research/
 ├── configs/
-│   ├── train.yaml          # top-level Hydra config
-│   ├── env/                # one file per environment
+│   ├── train.yaml              # base Hydra config for finetune.py
+│   ├── env/                    # one file per environment
 │   │   ├── libero_spatial.yaml
 │   │   └── pusht.yaml
-│   └── policy/             # one file per policy
+│   └── policy/                 # one file per policy
 │       ├── act.yaml
 │       ├── diffusion.yaml
 │       └── smolvla.yaml
 ├── scripts/
-│   ├── finetune.py         # lightweight training (smoke tests, quick runs)
-│   ├── sweep.py            # GPU batch-size sweep → outputs/sweep_cache.json
-│   └── train.py            # production training: AMP, checkpointing, resume
+│   ├── finetune.py             # custom training loop (Hydra + RunContext)
+│   ├── train.py                # longer runs with AMP + checkpointing
+│   ├── sweep.py                # throughput-optimal batch size finder
+│   └── verify_run.py           # check summary.json after a run
 ├── src/
-│   └── observability/      # RunContext → summary.json
-├── apptainer/              # container definition for HPC
-├── slurm/                  # SLURM job scripts for Zaratan
-└── outputs/
-    ├── sweep_cache.json    # cached optimal batch sizes per policy×dataset
-    └── train/
-        └── <experiment>/
-            ├── checkpoints/
-            ├── summary.json
-            └── eval/
+│   └── observability/          # RunContext → summary.json
+├── apptainer/
+│   └── vla.def                 # container definition for HPC
+└── slurm/
+    ├── train.slurm             # SLURM job script
+    └── cluster.env.example     # cluster path template
 ```
 
 ---
 
-## Verified smoke tests
+## Verified baselines
 
-| Policy | Env | Steps | Notes |
+| Policy | Environment | Steps | Result |
 |---|---|---|---|
-| Diffusion | PushT | 500 | loss 0.345 → 0.077, ~10 steps/s |
+| Diffusion Policy | PushT | 500 | loss 0.345 → 0.077 |
 | ACT | LIBERO Spatial | 500 | loss 6.67 → 3.02 |
 | SmolVLA | LIBERO Spatial | 500 | loss 2.13 → 0.93, peak VRAM 4.6 GB |
-| ACT | LIBERO Spatial | 10 000 | loss 76 → 0.24, bs=64, bfloat16 AMP |
+
+Hardware: RTX 3080 (10 GB). Cluster runs on L40S via SLURM + Apptainer.
 
 ---
 

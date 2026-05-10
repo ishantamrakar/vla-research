@@ -1,8 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# VLA training job
+# VLA training job — uses lerobot-train directly (ACT built-in hyperparameters)
 # Submit from repo root: sbatch slurm/train.slurm
-# Resume: just resubmit — train.py picks up from checkpoint_latest.pt
+# Resume: resubmit with --resume flag (uncomment below)
 # =============================================================================
 #SBATCH --job-name=vla-train
 #SBATCH --partition=scavenger
@@ -24,14 +24,11 @@ fi
 source "$CLUSTER_ENV"
 
 # ---- experiment config — edit before submitting ----------------------------
-EXPERIMENT="act_libero_spatial_50k"
-POLICY="act"
-ENV="libero_spatial"
-STEPS=50000
-CHECKPOINT_INTERVAL=5000
-EVAL_FREQ=25000
-N_EPISODES=5
-RENDER_VIDEOS="false"
+EXPERIMENT="act_libero_spatial_100k"
+STEPS=100000
+SAVE_FREQ=10000
+EVAL_FREQ=50000
+N_EPISODES=10
 WANDB_ENABLE="true"
 
 # ---- derived paths ----------------------------------------------------------
@@ -62,15 +59,21 @@ apptainer exec \
         uv sync --quiet
         uv pip install --editable $LEROBOT --quiet
 
-        uv run python scripts/train.py \
-            policy=$POLICY \
-            env=$ENV \
-            train.steps=$STEPS \
-            train.checkpoint_interval=$CHECKPOINT_INTERVAL \
-            train.render_eval_videos=$RENDER_VIDEOS \
-            eval.eval_freq=$EVAL_FREQ \
-            eval.n_episodes=$N_EPISODES \
-            experiment_name=$EXPERIMENT \
-            output_dir=$OUTPUTS/train/$EXPERIMENT \
-            wandb.enable=$WANDB_ENABLE
+        uv run lerobot-train \
+            --dataset.repo_id=lerobot/libero_spatial_image \
+            --policy.type=act \
+            --env.type=libero \
+            --env.task=libero_spatial \
+            --output_dir=$OUTPUTS/train/$EXPERIMENT \
+            --job_name=$EXPERIMENT \
+            --steps=$STEPS \
+            --save_freq=$SAVE_FREQ \
+            --eval_freq=$EVAL_FREQ \
+            --eval.n_episodes=$N_EPISODES \
+            --wandb.enable=$WANDB_ENABLE \
+            --policy.push_to_hub=false
     "
+    # To resume a previous run, replace the lerobot-train call above with:
+    # uv run lerobot-train \
+    #     --resume \
+    #     --config_path=$OUTPUTS/train/$EXPERIMENT/checkpoints/last/pretrained_model/train_config.json

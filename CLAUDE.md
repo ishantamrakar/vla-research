@@ -34,9 +34,9 @@ working pipeline and compare against a known baseline.
   - LeRobot sibling clone: ~/Documents/lerobot
 - **Personal M3 MacBook (secondary)**: read-only repo access, light scaffolding,
   documentation. Do NOT run sim or training there.
-- **UMIACS Nexus-CFAR (UMD HPC)**: real training runs, sweeps. SLURM + Apptainer.
-  Container: `apptainer/vla.def` → `vla.sif`. Job scripts: `slurm/train.slurm`,
-  `slurm/sweep.slurm`. Scratch path: `/scratch/users/$USER`. GPU: A100.
+- **UMIACS Nexus-CFAR (UMD HPC)**: real training runs. SLURM + Apptainer.
+  Container: `apptainer/vla.def` → `vla.sif`. Job script: `slurm/train.slurm`.
+  Scratch path: `/fs/nexus-scratch/$USER`. GPU: L40S (48 GB).
   (Switched from Zaratan — no free student tier.)
 
 ## VRAM budget reality (10GB)
@@ -79,5 +79,7 @@ working pipeline and compare against a known baseline.
 - Do not leap ahead phases. If asked to do Phase N, do only Phase N.
 - After any meaningful change, run the smoke test and report the output.
 - If a decision is made about stack, conventions, or hardware, append it here.
-- From Phase 3.2 onward, use `scripts/finetune.py` (which wraps `RunContext` natively) instead of `lerobot_train_wrapped.py` for training.
-- W&B logging and policy evaluation are built into `finetune.py`. Ensure W&B is configured in your `train.yaml` overrides (`wandb.enable=true`).
+- **Cluster training** uses `lerobot-train` directly via `slurm/train.slurm`. Do NOT use `scripts/train.py` or `scripts/sweep.py` for cluster runs — they were a premature reimplementation with wrong hyperparameters (lr 1e-4 vs ACT preset 1e-5; batch_size 512 from flawed VRAM sweep vs ACT's tested 8).
+- **Local dev / custom loop** uses `scripts/finetune.py` with Hydra + RunContext. Use when injecting custom research code into the training loop.
+- `sweep.py` is retained for throughput-optimal batch size discovery on custom (non-preset) policies. Not needed for stock `lerobot-train` runs.
+- W&B logging is built into `lerobot-train` (`--wandb.enable=true`). Also available in `finetune.py` via `wandb.enable=true` Hydra key.

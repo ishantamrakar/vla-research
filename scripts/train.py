@@ -149,6 +149,7 @@ def main(cfg: DictConfig):
             dataset, batch_size=batch_size, shuffle=True,
             num_workers=cfg.train.num_workers, pin_memory=pin,
             persistent_workers=cfg.train.num_workers > 0,
+            prefetch_factor=2 if cfg.train.num_workers > 0 else None,
         )
         dl_iter = iter(dl)
         camera_keys = dataset.meta.camera_keys

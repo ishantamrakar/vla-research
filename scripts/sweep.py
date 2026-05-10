@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
-GPU batch-size sweep: find the largest batch size that fits within VRAM headroom
-and cache the result for use by train.py.
+GPU batch-size sweep: find the throughput-optimal batch size (max samples/sec)
+that also stays within VRAM headroom. Caches the result for train.py.
 
 Usage:
     uv run python scripts/sweep.py policy=act env=libero_spatial
@@ -10,6 +10,7 @@ import copy
 import gc
 import json
 import logging
+import time
 
 import hydra
 import torch
@@ -23,7 +24,9 @@ from lerobot.policies import make_policy_config, make_policy, make_pre_post_proc
 log = logging.getLogger(__name__)
 
 SWEEP_CANDIDATES = [8, 16, 32, 64, 96, 128, 256, 512, 640, 786, 896, 1024]
-SWEEP_STEPS = 1
+# Warm-up + timed steps; first SWEEP_WARMUP steps are discarded, then SWEEP_TIMED are measured.
+SWEEP_WARMUP = 2
+SWEEP_TIMED = 5
 VRAM_HEADROOM_GB = 1.5
 SWEEP_CACHE = Path("outputs/sweep_cache.json")
 
@@ -93,8 +96,10 @@ def main(cfg: DictConfig):
     log.info(f"=== GPU batch-size sweep: {policy_type} + {repo_id} ===")
     log.info(f"GPU total: {_gb(gpu_total):.2f} GB   headroom: {VRAM_HEADROOM_GB} GB   "
              f"limit: {_gb(max_allowed):.2f} GB")
+    log.info(f"Selecting by throughput (samples/sec), not by max VRAM fit.")
 
-    optimal_bs = SWEEP_CANDIDATES[0]
+    best_bs = SWEEP_CANDIDATES[0]
+    best_throughput = 0.0
     policy_init = copy.deepcopy(
         make_policy(policy_cfg, ds_meta=dataset.meta).state_dict()
     )
@@ -118,50 +123,70 @@ def main(cfg: DictConfig):
             dataset, batch_size=bs, shuffle=True,
             num_workers=cfg.train.num_workers, pin_memory=pin,
             persistent_workers=cfg.train.num_workers > 0,
+            prefetch_factor=2 if cfg.train.num_workers > 0 else None,
         )
         dl_iter = iter(dl)
 
+        def _run_step():
+            try:
+                batch = next(dl_iter)
+            except StopIteration:
+                batch = next(iter(dl))
+            batch = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
+                     for k, v in batch.items()}
+            for k in camera_keys:
+                if k in batch and batch[k].dtype == torch.uint8:
+                    batch[k] = batch[k].float() / 255.0
+            batch = preprocessor(batch)
+            optimizer.zero_grad()
+            with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
+                out = policy.forward(batch)
+                loss = out[0] if isinstance(out, tuple) else (out["loss"] if isinstance(out, dict) else out)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            if grad_clip:
+                torch.nn.utils.clip_grad_norm_(policy.parameters(), grad_clip)
+            scaler.step(optimizer)
+            scaler.update()
+
         try:
-            for _ in range(SWEEP_STEPS):
-                try:
-                    batch = next(dl_iter)
-                except StopIteration:
-                    dl_iter = iter(dl)
-                    batch = next(dl_iter)
+            # warm-up (not timed)
+            for _ in range(SWEEP_WARMUP):
+                _run_step()
+            torch.cuda.synchronize(device)
 
-                batch = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
-                         for k, v in batch.items()}
-                for k in camera_keys:
-                    if k in batch and batch[k].dtype == torch.uint8:
-                        batch[k] = batch[k].float() / 255.0
-                batch = preprocessor(batch)
-
-                optimizer.zero_grad()
-                with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
-                    out = policy.forward(batch)
-                    loss = out[0] if isinstance(out, tuple) else (out["loss"] if isinstance(out, dict) else out)
-                scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
-                if grad_clip:
-                    torch.nn.utils.clip_grad_norm_(policy.parameters(), grad_clip)
-                scaler.step(optimizer)
-                scaler.update()
+            # timed steps
+            t0 = time.perf_counter()
+            for _ in range(SWEEP_TIMED):
+                _run_step()
+            torch.cuda.synchronize(device)
+            elapsed = time.perf_counter() - t0
 
             peak = torch.cuda.max_memory_allocated(device)
-            log.info(f"    batch_size={bs}: peak VRAM = {_gb(peak):.2f} GB")
+            throughput = bs * SWEEP_TIMED / elapsed  # samples/sec
+            log.info(f"    batch_size={bs}: peak VRAM={_gb(peak):.2f}GB  "
+                     f"throughput={throughput:.1f} samples/sec  "
+                     f"({elapsed/SWEEP_TIMED:.2f}s/step)")
 
             del policy, optimizer, scaler, dl, dl_iter
             gc.collect()
             torch.cuda.empty_cache()
 
             if peak > max_allowed:
-                log.info(f"    Over limit. Stopping.")
+                log.info(f"    Over VRAM limit — stopping.")
                 break
 
-            optimal_bs = bs
+            if throughput > best_throughput:
+                best_throughput = throughput
+                best_bs = bs
+            else:
+                # throughput is declining — stop searching larger batches
+                log.info(f"    Throughput dropped vs batch_size={best_bs} "
+                         f"({best_throughput:.1f} samples/sec) — stopping.")
+                break
 
         except torch.cuda.OutOfMemoryError:
-            log.info(f"    OOM at batch_size={bs}. Stopping.")
+            log.info(f"    OOM at batch_size={bs} — stopping.")
             try:
                 del policy, optimizer, scaler, dl, dl_iter
             except NameError:
@@ -170,8 +195,9 @@ def main(cfg: DictConfig):
             torch.cuda.empty_cache()
             break
 
-    log.info(f"=== Optimal batch_size: {optimal_bs} ===")
-    save_cache(policy_type, repo_id, optimal_bs)
+    log.info(f"=== Optimal batch_size: {best_bs} "
+             f"({best_throughput:.1f} samples/sec) ===")
+    save_cache(policy_type, repo_id, best_bs)
 
 
 if __name__ == "__main__":
