@@ -1,0 +1,30 @@
+# Config for scripts/profile_latency.py.
+#
+# Separate from train.yaml because Hydra rejects keys absent from the schema,
+# and the profiler needs its own (steps/warmup/dtypes) while needing almost
+# nothing train.yaml carries -- no optimizer, no wandb, no checkpointing.
+defaults:
+  - env: libero_spatial
+  - policy: smolvla
+  - _self_
+
+hydra:
+  run:
+    dir: ${out_dir}
+  job:
+    chdir: false
+
+out_dir: "outputs/latency"
+
+# 500 is the plan's number. Note p99 of 500 samples is the 5th-worst
+# observation -- a real but coarse estimate, enough to separate "fits in a
+# control step" from "does not" and not enough for three significant figures.
+steps: 500
+
+# Discarded before the statistics. cuDNN autotuning and lazy init make the
+# first calls several times slower; they are reported separately rather than
+# dropped silently.
+warmup: 20
+
+# fp32 first so a dtype-support failure in fp16 still leaves a usable result.
+dtypes: [fp32, fp16]
