@@ -24,20 +24,44 @@ working pipeline and compare against a known baseline.
 - **Containers**: Apptainer for Zaratan deployment (built later)
 
 ## Hardware
-- Lab workstation (primary):
+
+**Policy: HPC is where runs happen. The 3080 and the MacBook are prototyping
+machines only.** Anything whose numbers go in a paper — training, evaluation,
+benchmarks, latency profiles — runs on Nexus. Local hardware is for making
+code work before it gets there: shape errors, config bugs, does-it-import,
+does-one-step-run. A local result is a smoke test, not a finding.
+
+Why the rule, rather than "use whatever is free": local and cluster runs
+disagree in ways that are invisible in the output. Different GPU, different
+VRAM ceiling forcing a different batch size, different CUDA wheel. A number
+produced on the 3080 and a number produced on the L40S are not comparable,
+and mixing them across a results table is the kind of error nobody catches
+by reading. One machine owns the numbers.
+
+- **UMIACS Nexus-CFAR (UMD HPC) — PRIMARY, all real runs.** SLURM + Apptainer.
+  Container: `apptainer/vla.def` → `vla.sif`. Job scripts: `slurm/train.slurm`,
+  `slurm/eval.slurm`, `slurm/latency.slurm`.
+  Scratch path: `/fs/nexus-scratch/$USER`. GPU: L40S (48 GB).
+  (Switched from Zaratan — no free student tier.)
+- **Lab workstation (prototyping)**:
   - GPU: NVIDIA GeForce RTX 3080 (10GB VRAM)
   - Driver: 580.126.09 (supports CUDA up to 13.0)
   - System CUDA toolkit: 12.0
   - PyTorch wheel: cu124
   - OS: Ubuntu 24.04.4 LTS (Noble)
-  - Repo location: ~/Documents/vla-research 
+  - Repo location: ~/Documents/vla-research
   - LeRobot sibling clone: ~/Documents/lerobot
-- **Personal M3 MacBook (secondary)**: read-only repo access, light scaffolding,
-  documentation. Do NOT run sim or training there.
-- **UMIACS Nexus-CFAR (UMD HPC)**: real training runs. SLURM + Apptainer.
-  Container: `apptainer/vla.def` → `vla.sif`. Job script: `slurm/train.slurm`.
-  Scratch path: `/fs/nexus-scratch/$USER`. GPU: L40S (48 GB).
-  (Switched from Zaratan — no free student tier.)
+  - Use for: short smoke runs, debugging a policy that crashes, checking a
+    config change loads. Not for results.
+- **Personal M3 MacBook (prototyping)**: scaffolding, documentation, analysis
+  of already-computed results, writing job scripts. No CUDA, so no sim and no
+  training — a run that needs a GPU is a run that goes to Nexus.
+
+**The one deliberate exception: hardware-specific measurements.** Experiment 1
+(inference latency) is *about* a particular GPU, so an L40S number is not a
+substitute for a 3080 number — it is a lower bound. Where a measurement's
+whole point is the hardware it ran on, run it on both and report both. See
+`docs/experiment_01_latency.md`.
 
 ## VRAM budget reality (10GB)
 - Diffusion Policy / ACT / SmolVLA: fine for fine-tuning, batch ≤ 16

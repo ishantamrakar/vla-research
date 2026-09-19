@@ -27,7 +27,8 @@ On the cluster:
 sbatch slurm/latency.slurm
 ```
 
-On the lab workstation (no SLURM, no container needed):
+On the lab workstation, as the second hardware data point (no SLURM, no
+container needed):
 
 ```bash
 uv run python scripts/profile_latency.py policy=smolvla env=libero_spatial
@@ -35,19 +36,31 @@ uv run python scripts/profile_latency.py policy=smolvla env=libero_spatial
 
 Output lands in `outputs/latency/<policy>_<env>.{md,json}`.
 
-## The hardware caveat, which decides how the result is read
+## Hardware: Nexus owns the numbers, with one deliberate exception
 
-The cluster GPU is an **L40S (48 GB)**. The thesis is about the **RTX 3080
-(10 GB)** lab workstation. An L40S is substantially faster, so cluster numbers
-are a **lower bound** on 3080 latency:
+Per `CLAUDE.md`, **all real runs go to Nexus**; the 3080 and the MacBook are
+prototyping machines. Experiment 1 is the one place that rule needs a rider,
+because this measurement is *about* the GPU it ran on.
+
+So both figures are wanted, and they answer different questions:
+
+| GPU | role | what a result here means |
+|---|---|---|
+| **L40S** (Nexus) | the reported number | the headline result; comparable with every other number in the thesis |
+| **RTX 3080** (lab) | a second data point | what a smaller/older deployment GPU does — a realistic robot is not attached to a 48 GB datacentre card |
+
+An L40S is substantially faster, so **cluster numbers are a lower bound on
+3080 latency**, and the asymmetry decides what each run can conclude:
 
 - p99 **misses** the control step on the L40S → it certainly misses on a 3080.
-  The chapter is alive, conclusively, and you can proceed to experiment 5.
-- p99 **fits** on the L40S → **this is not the kill.** The 3080 may still miss.
-  Re-run on the workstation before declaring anything dead.
+  The chapter is alive, conclusively; proceed to experiment 5.
+- p99 **fits** on the L40S → **this is not the kill.** Re-run on the 3080
+  before declaring anything dead.
 
-This asymmetry is why the job script says so in its header: the cheap cluster
-run can only *confirm* the chapter, never *kill* it.
+The cheap cluster run can only *confirm* the chapter, never *kill* it. Running
+on the 3080 as well is therefore not a violation of the HPC-first rule but a
+consequence of it: the hypothesis is explicitly about hardware that is slower
+than the cluster.
 
 ## Measurement decisions, and what breaks without each
 
