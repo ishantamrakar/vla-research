@@ -21,10 +21,16 @@ One LIBERO control step is **50 ms** (20 Hz controller).
 
 ## Run it
 
-On the cluster:
+On the cluster — sweep across GPU generations (recommended):
 
 ```bash
-sbatch slurm/latency.slurm
+bash slurm/sweep_latency.sh
+```
+
+Or one GPU at a time:
+
+```bash
+sbatch --gres=gpu:rtxa4000:1 slurm/latency.slurm
 ```
 
 On the lab workstation, as the second hardware data point (no SLURM, no
@@ -34,7 +40,9 @@ container needed):
 uv run python scripts/profile_latency.py policy=smolvla env=libero_spatial
 ```
 
-Output lands in `outputs/latency/<policy>_<env>.{md,json}`.
+Output lands in `outputs/latency/<gpu>/<policy>_<env>.{md,json}`, keyed by the
+GPU the job actually landed on (read from `nvidia-smi`, not from the requested
+`--gres` type), so a sweep never overwrites itself.
 
 ## Hardware: Nexus owns the numbers, with one deliberate exception
 
@@ -48,6 +56,18 @@ So both figures are wanted, and they answer different questions:
 |---|---|---|
 | **L40S** (Nexus) | the reported number | the headline result; comparable with every other number in the thesis |
 | **RTX 3080** (lab) | a second data point | what a smaller/older deployment GPU does — a realistic robot is not attached to a 48 GB datacentre card |
+
+### Sweep the GPU rather than picking one
+
+Nexus scavenger carries everything from 2017 Pascal cards to H200s, and this
+experiment is *about* the GPU — so a curve across generations is a stronger
+result than any single number, and says where the control deadline is missed
+and where it is not. `slurm/sweep_latency.sh` submits one job per type.
+
+It is also faster in practice: every `l40s` node is frequently allocated while
+dozens of `rtxa4000` and `gtx1080ti` nodes sit idle, so pinning `l40s` can mean
+hours of queue for minutes of compute. `rtxa4000` (Ampere, 16 GB) is the
+closest available card to the thesis's RTX 3080 and is usually free.
 
 An L40S is substantially faster, so **cluster numbers are a lower bound on
 3080 latency**, and the asymmetry decides what each run can conclude:

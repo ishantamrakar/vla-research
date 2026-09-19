@@ -27,6 +27,18 @@
 # Short job: this is minutes of work, so it is worth requesting a small time
 # limit to get scheduled quickly on `scavenger`. Preemption is survivable
 # here (unlike training) -- just resubmit, there is no checkpoint to lose.
+#
+# CHOOSING THE GPU. The --gres line below is only a DEFAULT. Override it at
+# submit time, because #SBATCH directives cannot read shell variables:
+#
+#     sbatch --gres=gpu:rtxa4000:1 slurm/latency.slurm
+#
+# This matters practically and scientifically. Practically: Nexus scavenger
+# often has every l40s busy while dozens of rtxa4000/gtx1080ti nodes sit idle,
+# so pinning l40s can mean waiting hours for a job that runs in minutes.
+# Scientifically: this experiment is ABOUT the GPU, so a spread across
+# generations is a stronger result than any single card. `slurm/sweep_latency.sh`
+# submits one job per GPU type for exactly that reason.
 # =============================================================================
 #SBATCH --job-name=vla-latency
 #SBATCH --partition=scavenger
@@ -47,16 +59,23 @@ fi
 source "$CLUSTER_ENV"
 
 # ---- profile config — edit before submitting --------------------------------
-POLICY="smolvla"
-ENV_NAME="libero_spatial"
-STEPS=500
-WARMUP=20
+POLICY="${POLICY:-smolvla}"
+ENV_NAME="${ENV_NAME:-libero_spatial}"
+STEPS="${STEPS:-500}"
+WARMUP="${WARMUP:-20}"
+
+# Results are keyed by GPU so a sweep does not overwrite itself. SLURM does not
+# expose the GPU model directly, so read it from the device rather than from
+# the --gres string, which may say "l40s" while the node hands you something
+# else entirely.
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1 \
+           | tr -d " " | tr "[:upper:]" "[:lower:]" | sed "s|nvidia||g")
 
 # ---- derived paths ----------------------------------------------------------
 SIF=$REPO/apptainer/vla.sif
-OUT_DIR=$REPO/outputs/latency
+OUT_DIR=$REPO/outputs/latency/$GPU_NAME
 
-echo "Profiling: policy=$POLICY env=$ENV_NAME steps=$STEPS"
+echo "Profiling: policy=$POLICY env=$ENV_NAME steps=$STEPS gpu=$GPU_NAME"
 echo "Output:    $OUT_DIR"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 
