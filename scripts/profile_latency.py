@@ -33,6 +33,18 @@ Measurement notes, each of which changes the number if skipped:
     tensors for free; image resize/normalise and tokenisation happen per step.
     Timing the bare forward pass measures something no deployment ever sees,
     so we time both and report the difference.
+  * **fp16 is measured with `torch.autocast`, not `policy.half()`.** Hard-
+    casting the weights fails: the preprocessor holds fp32 normalisation
+    buffers and re-emits fp32 every step, so a cast applied to the batch is
+    undone before the weights see it ("mat1 and mat2 must have the same
+    dtype, but got Float and Half" -- cluster job 7584256). The cast has to
+    sit downstream of preprocessing, which autocast does by construction.
+    It is also safer: SmolVLA wraps a VLM whose LayerNorms want fp32, and
+    half()-ing everything can produce NaNs rather than an error, which
+    yields plausible timings from a broken forward pass.
+  * **Results are written after every condition, not at the end.** That same
+    job completed fp32 and then died in fp16, losing the fp32 numbers with
+    it. A later failure should cost only the conditions that did not run.
   * **p99 of 500 samples is the 5th-worst observation.** It is a real but
     coarse estimate; do not read three significant figures into it. 500 is the
     plan's number and is enough to separate "fits in a control step" from
@@ -124,12 +136,17 @@ def time_policy(
     steps: int,
     warmup: int,
     with_preprocessing: bool,
+    autocast_dtype: torch.dtype | None = None,
 ) -> tuple[list[float], list[float]]:
     """Time `steps` select_action calls, after `warmup` discarded ones.
 
     Returns (samples_ms, warmup_ms). Warmup is returned rather than dropped
     because a policy that takes seconds on its first call has a real deployment
     problem that a steady-state distribution would hide.
+
+    `autocast_dtype` runs the forward pass under `torch.autocast`. That is
+    used instead of hard-casting the policy's weights (see main()), so the
+    reduced-precision numbers reflect how fp16 is actually deployed.
     """
     samples: list[float] = []
     warmups: list[float] = []
@@ -145,7 +162,11 @@ def time_policy(
 
         step_batch = preprocessor(batch) if with_preprocessing else static_batch
         with torch.inference_mode():
-            policy.select_action(step_batch)
+            if autocast_dtype is not None:
+                with torch.autocast("cuda", dtype=autocast_dtype):
+                    policy.select_action(step_batch)
+            else:
+                policy.select_action(step_batch)
 
         _sync()
         dt_ms = (time.perf_counter() - t0) * 1000.0
@@ -286,9 +307,27 @@ def main(cfg: DictConfig) -> None:
         for k, v in sample.items()
     }
 
+    stem = f"{cfg.policy.type}_{cfg.env.type}"
+
+    def save(stats: list[LatencyStats]) -> None:
+        """Write the report after every condition, not once at the end.
+
+        Job 7584256 completed fp32 and then died in fp16, and because the
+        report was written only after the whole loop, the fp32 numbers were
+        lost with it. Saving incrementally means a later failure costs only
+        the conditions that did not run.
+        """
+        if not stats:
+            return
+        (out_dir / f"{stem}.md").write_text(format_report(stats, meta))
+        (out_dir / f"{stem}.json").write_text(
+            json.dumps(
+                {"meta": meta, "stats": [asdict(x) for x in stats]}, indent=2
+            )
+        )
+
     all_stats: list[LatencyStats] = []
     for dtype_name in dtypes:
-        torch_dtype = {"fp16": torch.float16, "fp32": torch.float32}[dtype_name]
         log.info("=== %s ===", dtype_name)
 
         policy_cfg = make_policy_config(cfg.policy.type, **{
@@ -297,28 +336,30 @@ def main(cfg: DictConfig) -> None:
         })
         policy = make_policy(policy_cfg, ds_meta=ds.meta)
         policy.to(device)
-        # Cast weights only for fp16. Calling .to(dtype=float32) is a no-op for
-        # an already-fp32 policy, but doing it unconditionally would also
-        # downcast any module the policy deliberately keeps in another dtype.
-        if torch_dtype is torch.float16:
-            policy.half()
         policy.eval()
         preprocessor, _ = make_pre_post_processors(
             policy_cfg, dataset_stats=ds.meta.stats
         )
 
-        # Float inputs must match the weights or the forward pass raises a
-        # dtype mismatch. Only floating tensors are cast -- integer tensors
-        # here are token ids and indices, which must stay integral.
-        dtype_batch = {
-            k: (v.to(torch_dtype) if isinstance(v, torch.Tensor)
-                and v.is_floating_point() else v)
-            for k, v in batch.items()
-        }
+        # fp16 is done with autocast, NOT by half()-ing the weights.
+        #
+        # Two reasons, both learned from a failed cluster run (job 7584256,
+        # "mat1 and mat2 must have the same dtype, but got Float and Half").
+        # First, the preprocessor holds fp32 normalisation buffers and re-emits
+        # fp32 every step, so any cast applied to the batch beforehand is undone
+        # before the weights ever see it -- the cast has to sit downstream of
+        # preprocessing, which autocast does by construction.
+        # Second, SmolVLA wraps a VLM whose LayerNorms want fp32; half()-ing
+        # everything can yield NaNs instead of an error, which is worse than a
+        # crash because it produces plausible timings from a broken forward
+        # pass. Autocast picks precision per op and is also how fp16 is actually
+        # deployed, so it is the more honest thing to measure.
+        autocast_dtype = torch.float16 if dtype_name == "fp16" else None
 
         for with_pre in (False, True):
             samples, warmups = time_policy(
-                policy, dtype_batch, preprocessor, steps, warmup, with_pre
+                policy, batch, preprocessor, steps, warmup, with_pre,
+                autocast_dtype=autocast_dtype,
             )
             st = summarize(cfg.policy.type, dtype_name, with_pre, samples, warmups)
             all_stats.append(st)
@@ -328,16 +369,14 @@ def main(cfg: DictConfig) -> None:
                 st.control_steps_p99,
             )
 
+        save(all_stats)
         del policy
         torch.cuda.empty_cache()
 
-    report = format_report(all_stats, meta)
-    print(report)
-    stem = f"{cfg.policy.type}_{cfg.env.type}"
-    (out_dir / f"{stem}.md").write_text(report)
-    (out_dir / f"{stem}.json").write_text(
-        json.dumps({"meta": meta, "stats": [asdict(s) for s in all_stats]}, indent=2)
-    )
+    if not all_stats:
+        raise SystemExit("no condition completed -- see the traceback above")
+
+    print(format_report(all_stats, meta))
     log.info("wrote %s", out_dir / f"{stem}.md")
 
 
